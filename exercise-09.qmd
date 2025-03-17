@@ -1,0 +1,155 @@
+---
+title: "exercise-09"
+format: html
+editor: visual
+---
+
+### Packages
+
+```{r}
+library(tidyverse)
+library(skimr)
+library(infer)
+```
+
+### Step 1
+
+```{r}
+f <- "https://raw.githubusercontent.com/difiore/ada-datasets/main/Street_et_al_2017.csv"
+d <- read_csv(f, col_names = T)
+skim(d)
+```
+
+### Step 2
+
+```{r}
+plot(d$ECV ~ d$Group_size)
+plot(d$ECV ~ d$Longevity)
+plot(d$ECV ~ d$Weaning)
+plot(d$ECV ~ d$Repro_lifespan)
+```
+
+### Step 3
+
+```{r}
+d_fil <- d %>%
+  select(ECV, Group_size) %>%
+  na.omit()
+
+(beta1 <- cor(d_fil$Group_size, d_fil$ECV) * (sd(d_fil$ECV)/sd(d_fil$Group_size)))
+(beta0 <- mean(d_fil$ECV) - beta1 * mean(d_fil$Group_size))
+```
+
+### Step 4
+
+```{r}
+mod <- lm(ECV ~ Group_size, data = d_fil)
+summary(mod)
+```
+
+### Step 5
+
+```{r}
+# Catarrhini
+d_cat <- d %>%
+  filter(Taxonomic_group == "Catarrhini") %>%
+  select(ECV, Group_size) %>%
+  na.omit()
+(beta1 <- cor(d_cat$Group_size, d_cat$ECV) * (sd(d_cat$ECV)/sd(d_cat$Group_size)))
+(beta0 <- mean(d_cat$ECV) - beta1 * mean(d_cat$Group_size))
+mod_cat <- lm(ECV ~ Group_size, data = d_cat)
+summary(mod_cat)
+
+# Platyrrhini
+d_pla <- d %>%
+  filter(Taxonomic_group == "Platyrrhini") %>%
+  select(ECV, Group_size) %>%
+  na.omit()
+(beta1 <- cor(d_pla$Group_size, d_pla$ECV) * (sd(d_pla$ECV)/sd(d_pla$Group_size)))
+(beta0 <- mean(d_pla$ECV) - beta1 * mean(d_pla$Group_size))
+mod_pla <- lm(ECV ~ Group_size, data = d_pla)
+summary(mod_pla)
+
+# Strepsirhini
+d_str <- d %>%
+  filter(Taxonomic_group == "Strepsirhini") %>%
+  select(ECV, Group_size) %>%
+  na.omit()
+(beta1 <- cor(d_str$Group_size, d_str$ECV) * (sd(d_str$ECV)/sd(d_str$Group_size)))
+(beta0 <- mean(d_str$ECV) - beta1 * mean(d_str$Group_size))
+mod_str <- lm(ECV ~ Group_size, data = d_str)
+summary(mod_str)
+```
+
+From the summary of each model, the regression coefficients for ECV as a function of Group_size differ among catarrhines, platyrrhines, and strepsirhines.
+
+```{r}
+df <- d %>%
+  filter(!is.na(ECV) & !is.na(Group_size))
+mod_grp <- lm(ECV ~ Group_size + Taxonomic_group + Group_size * Taxonomic_group, data = df)
+summary(mod_grp)
+```
+
+Yet the interacting term illustrates that the differences in slopes among groups are not siginificant.
+
+### Step 6
+```{r}
+beta1 <- cor(d_fil$Group_size, d_fil$ECV) * (sd(d_fil$ECV)/sd(d_fil$Group_size))
+beta0 <- mean(d_fil$ECV) - beta1 * mean(d_fil$Group_size)
+
+# Standard error for the slope coefficient
+SSE <- sum(mod$residuals^2)
+df_regression <- 1
+df_error <- nrow(d_fil) - df_regression - 1
+MSE <- SSE/df_error
+SSX <- sum((mod$model$Group_size - mean(mod$model$Group_size))^2)
+(SEbeta1 <- sqrt(MSE/SSX))
+
+summary(mod)$coefficients["Group_size", "Std. Error"]
+
+# 95% CI
+crit <- qt(0.975, mod$df.residual)
+(CI_lower <- beta1 - crit * SEbeta1)
+(CI_upper <- beta1 + crit * SEbeta1)
+
+confint(mod, level = 0.95)
+
+# P-value
+t <- beta1/SEbeta1
+(p_val <- 2 * (1 - pt(abs(t), df_error)))
+
+summary(mod)$coefficients["Group_size", "Pr(>|t|)"]
+```
+
+### Step 7
+```{r}
+nperm = 1000
+perm <- mosaic::do(nperm) * {
+  d_new <- d_fil
+  d_new$Group_size <- sample(d_new$Group_size)
+  m <- lm(ECV ~ Group_size, data = d_new)
+  broom::tidy(m) %>%
+    filter(term == "Group_size") %>%
+    pull(estimate)
+}
+
+(p <- mean(abs(perm$result) >= abs(beta1)))
+```
+
+### Step 8
+```{r}
+boot.slope <- d_fil %>%
+  specify(ECV ~ Group_size) %>%
+  generate(reps = 1000, type = "bootstrap") %>%
+  calculate(stat = "slope")
+
+(quantile_CI <- boot.slope %>%
+  summarize(
+    lower = quantile(stat, 0.025),
+    upper = quantile(stat, 0.975)
+  ))
+
+(boot.slope.summary <- boot.slope %>%
+  summarize(estimate = mean(stat), std.error = sd(stat), lower = estimate - std.error * crit, upper = estimate + std.error * crit))
+```
+The both CIs do not include zero, so  the slope coefficient is significantly different from zero.
